@@ -1,0 +1,136 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <sys/time.h>
+#include <signal.h>
+
+#define MAX_PORT_RANGE 65535  
+#define MAX_BUFFER_SIZE 516   
+
+// Timeout duration in seconds
+#define DATA_TIMEOUT 1
+#define CONNECTION_TIMEOUT 10
+
+// Function to handle RRQ (Read Request)
+void handle_rrq(int sockfd, struct sockaddr_in client_address, char *filename) {
+    // Implement RRQ (Read Request) handling here
+}
+
+// Function to handle WRQ (Write Request)
+void handle_wrq(int sockfd, struct sockaddr_in client_address, char *filename) {
+    // Implement WRQ (Write Request) handling here
+}
+
+int main(int argc, char *argv[]) {
+    if (argc != 3) {
+        fprintf(stderr, "Usage: %s [start of port range] [end of port range]\n", argv[0]);
+        exit(1);
+    }
+
+    int start_port = atoi(argv[1]);
+    int end_port = atoi(argv[2]);
+
+    if (start_port <= 0 || end_port <= 0 || start_port > MAX_PORT_RANGE || end_port > MAX_PORT_RANGE || start_port >= end_port) {
+        fprintf(stderr, "Invalid port range\n");
+        exit(1);
+    }
+
+    int sockfd;
+    struct sockaddr_in server_address, client_address;
+    socklen_t client_len = sizeof(client_address);
+    char buffer[MAX_BUFFER_SIZE];
+
+
+    // Create socket
+    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd < 0) {
+        perror("Error opening socket");
+        exit(1);
+    }
+
+    // Initialize server_address structure
+    memset(&server_address, 0, sizeof(server_address));
+    server_address.sin_family = AF_INET;
+    server_address.sin_addr.s_addr = INADDR_ANY;
+
+    int current_port = start_port;
+
+    while (1) {
+        // Set the port for the server_address
+        server_address.sin_port = htons(current_port);
+
+        // Bind socket
+        if (bind(sockfd, (struct sockaddr *)&server_address, sizeof(server_address)) < 0) {
+            perror("Error binding");
+            current_port++;
+
+            if (current_port > end_port) {
+                fprintf(stderr, "No available ports in the specified range\n");
+                exit(1);
+            }
+
+            continue;
+        }
+
+        // Set up timer for data timeout
+        struct timeval data_timeout;
+        data_timeout.tv_sec = DATA_TIMEOUT;
+        data_timeout.tv_usec = 0;
+
+        // Set up timer for connection timeout
+        struct timeval connection_timeout;
+        connection_timeout.tv_sec = CONNECTION_TIMEOUT;
+        connection_timeout.tv_usec = 0;
+
+        // Initialize and set up file descriptors for select()
+        fd_set read_fds;
+        FD_ZERO(&read_fds);
+        FD_SET(sockfd, &read_fds);
+
+        int select_result = select(sockfd + 1, &read_fds, NULL, NULL, &connection_timeout);
+
+        if (select_result < 0) {
+            perror("Error in select");
+            continue;
+        } else if (select_result == 0) {
+            // Connection timeout
+            printf("Connection timeout, aborting\n");
+            break;
+        }
+
+        if (FD_ISSET(sockfd, &read_fds)) {
+            // Receive request
+            memset(buffer, 0, sizeof(buffer));
+            ssize_t bytes_received = recvfrom(sockfd, buffer, sizeof(buffer), 0, (struct sockaddr *)&client_address, &client_len);
+
+            if (bytes_received < 0) {
+                perror("Error receiving request");
+                continue;
+            }
+
+            // Extract opcode
+            unsigned short opcode;
+            memcpy(&opcode, buffer, sizeof(unsigned short));
+            opcode = ntohs(opcode);
+
+            if (opcode == 1) {
+                // RRQ - Read Request
+                char *filename = buffer + 2;
+                handle_rrq(sockfd, client_address, filename);
+            } else if (opcode == 2) {
+                // WRQ - Write Request
+                char *filename = buffer + 2;
+                handle_wrq(sockfd, client_address, filename);
+            } else {
+                // Unsupported opcode
+                printf("Unsupported opcode: %d\n", opcode);
+            }
+        }
+    }
+
+    close(sockfd);
+    return 0;
+}
