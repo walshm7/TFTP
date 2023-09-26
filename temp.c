@@ -26,8 +26,8 @@ void handle_wrq(int sockfd, struct sockaddr_in client_address, char *filename) {
     // Implement WRQ (Write Request) handling here
 }
 
-// Function to handle ERROR
-void handle_error(int sockfd, struct sockaddr_in * client_address, int error_code){
+// Function to send ERROR
+void send_error(int sockfd, struct sockaddr_in * client_address, int error_code){
     char * packet; 
     char * msg;
     int packet_size = 5; // opcodes and end byte
@@ -223,7 +223,7 @@ int main(int argc, char *argv[]) {
                 // Unsupported opcode
                 printf("Unsupported opcode: %d\n", opcode);
                 // Send ERROR packet
-                handle_error(sockfd, &client_address, 4);
+                send_error(sockfd, &client_address, 4);
             }
         }
     }
