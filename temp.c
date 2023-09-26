@@ -14,16 +14,110 @@
 #define DATA_TIMEOUT 1
 #define CONNECTION_TIMEOUT 10
 
-// Function to handle RRQ (Read Request)
+// Function to handle RRQ (Read Request) (will call send_data?)
 void handle_rrq(int sockfd, struct sockaddr_in client_address, char *filename) {
     // Implement RRQ (Read Request) handling here
+    
+    // Open file
+    FILE * read_file = fopen(filename, 'r');
 
+    // Send error for failed open file
+    if(read_file == -1){
+        send_error(sockfd, &client_address, 1);
+    }
+
+    // Start read
+    int block_num = 1;
+    int file_size;
+    fseek(read_file, 0, SEEK_END);
+    file_size = ftell(read_file);
+    fseek(read_file, 0, SEEK_SET);
+    char * data;
+    if(file_size < 512){
+        data = calloc(file_size + 1, sizeof(char));
+        fread(data, sizeof(char), file_size, read_file);
+        data[file_size] = '\0';
+        send_data(sockfd, &client_address, block_num, data, file_size+1);
+
+        // Wait for ACK
+        while(1){
+            // Set up timer for data timeout
+            struct timeval data_timeout;
+            data_timeout.tv_sec = DATA_TIMEOUT;
+            data_timeout.tv_usec = 0;
+
+            // Set up timer for connection timeout
+            struct timeval connection_timeout;
+            connection_timeout.tv_sec = CONNECTION_TIMEOUT;
+            connection_timeout.tv_usec = 0;
+
+            // Initialize and set up file descriptors for select()
+            fd_set read_fds;
+            FD_ZERO(&read_fds);
+            FD_SET(sockfd, &read_fds);
+
+            // 10 second timer
+            int select_result = select(sockfd + 1, &read_fds, NULL, NULL, &connection_timeout);
+
+            int resend_result = select(sockfd + 1, &read_fds, NULL, NULL, &data_timeout);
+
+            if (resend_result < 0) {
+                perror("Error in select");
+                exit(1);
+            } else if (resend_result == 0) {
+                // resend data
+                send_data(sockfd, &client_address, block_num, data, file_size+1);
+                continue;
+            }
+
+            if (select_result < 0) {
+                perror("Error in select");
+                exit(1);
+            } else if (select_result == 0) {
+                // Connection timeout
+                printf("Connection timeout, aborting\n");
+                exit(1);
+            }
+        }
+    }
+    else{ //require multiple reads
+        while(){
+            block_num++;
+        }
+
+    }
 
 }
 
-// Function to handle WRQ (Write Request)
+// Function to handle WRQ (Write Request) (will call handle data)
 void handle_wrq(int sockfd, struct sockaddr_in client_address, char *filename) {
     // Implement WRQ (Write Request) handling here
+}
+
+// Function to handle DATA packet
+void handle_data(){
+
+}
+
+// Function to handle ERROR packet
+void handle_error(){
+
+}
+
+// Function to send DATA packet
+void send_data(int sockfd, struct sockaddr_in * client_address, int block_num, char * data, int data_len){
+    // Build packet
+    char *packet = calloc(4+data_len, sizeof(char));
+    *packet = htons(3);
+    packet +=2;
+    *packet = htons(block_num);
+    strcat(packet, data);
+
+    // Send packet
+    sendto(sockfd, packet, 4+data_len, 0, (struct sockaddr *) client_address, sizeof(client_address));
+
+    // Free packet
+    free(packet);
 }
 
 // Function to send ERROR
@@ -100,12 +194,12 @@ void send_error(int sockfd, struct sockaddr_in * client_address, int error_code)
     free(packet);
     free(msg);
 
-    // Terminate connection
+    // Terminate connection (should just exit child)
     exit(1);
 }
 
-// Function to handle ACK
-void handle_ack(int sockfd, struct sockaddr_in * client_address, int block_num){
+// Function to send ACK
+void send_ack(int sockfd, struct sockaddr_in * client_address, int block_num){
     // Build ACK packet
     char * packet = calloc(4, sizeof(char));
     *packet = htons(4);
@@ -118,6 +212,8 @@ void handle_ack(int sockfd, struct sockaddr_in * client_address, int block_num){
     // Free packet
     free(packet);
 }
+
+
 
 int main(int argc, char *argv[]) {
     if (argc != 3) {
@@ -152,7 +248,8 @@ int main(int argc, char *argv[]) {
     server_address.sin_addr.s_addr = INADDR_ANY;
 
     int current_port = start_port;
-
+    int rc = getpid();
+    int tid = start_port;
     while (1) {
         // Set the port for the server_address
         server_address.sin_port = htons(current_port);
@@ -206,24 +303,57 @@ int main(int argc, char *argv[]) {
                 continue;
             }
 
-            // Extract opcode
-            unsigned short opcode;
-            memcpy(&opcode, buffer, sizeof(unsigned short));
-            opcode = ntohs(opcode);
+            // Get next server TID (only for new connection)
+            if(rc != 0){
+                if(start_port + 1 < end_port){
+                    tid = start_port + 1;
 
-            if (opcode == 1) {
-                // RRQ - Read Request
-                char *filename = buffer + 2;
-                handle_rrq(sockfd, client_address, filename);
-            } else if (opcode == 2) {
-                // WRQ - Write Request
-                char *filename = buffer + 2;
-                handle_wrq(sockfd, client_address, filename);
-            } else {
-                // Unsupported opcode
-                printf("Unsupported opcode: %d\n", opcode);
-                // Send ERROR packet
-                send_error(sockfd, &client_address, 4);
+                    // Fork process
+                    rc = fork;
+                }
+                else{// cancel connection?
+
+                }
+            }
+
+            if(rc == 0){
+                // Open new socket for connection
+                // Set the port for the server_address
+
+                server_address.sin_port = htons(tid);
+
+                // Bind socket
+                if (bind(sockfd, (struct sockaddr *)&server_address, sizeof(server_address)) < 0) {
+                    perror("Error binding");
+                    tid++;
+
+                    if (tid > end_port) {
+                        fprintf(stderr, "No available ports in the specified range\n");
+                        exit(1);
+                    }
+
+                    continue;
+                }
+
+                // Extract opcode
+                unsigned short opcode;
+                memcpy(&opcode, buffer, sizeof(unsigned short));
+                opcode = ntohs(opcode);
+
+                if (opcode == 1) {
+                    // RRQ - Read Request
+                    char *filename = buffer + 2;
+                    handle_rrq(sockfd, client_address, filename);
+                } else if (opcode == 2) {
+                    // WRQ - Write Request
+                    char *filename = buffer + 2;
+                    handle_wrq(sockfd, client_address, filename);
+                } else {
+                    // Unsupported opcode
+                    printf("Unsupported opcode: %d\n", opcode);
+                    // Send ERROR packet
+                    send_error(sockfd, &client_address, 4);
+                }
             }
         }
     }
