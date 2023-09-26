@@ -105,6 +105,19 @@ void handle_error(int sockfd, struct sockaddr_in * client_address, int error_cod
 }
 
 // Function to handle ACK
+void handle_ack(int sockfd, struct sockaddr_in * client_address, int block_num){
+    // Build ACK packet
+    char * packet = calloc(4, sizeof(char));
+    *packet = htons(4);
+    packet +=2;
+    *packet =  htons(block_num);
+
+    // Send packet
+    sendto(sockfd, packet, 4, 0, (struct sockaddr *) client_address, sizeof(client_address));
+
+    // Free packet
+    free(packet);
+}
 
 int main(int argc, char *argv[]) {
     if (argc != 3) {
