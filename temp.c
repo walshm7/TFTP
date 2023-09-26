@@ -17,12 +17,94 @@
 // Function to handle RRQ (Read Request)
 void handle_rrq(int sockfd, struct sockaddr_in client_address, char *filename) {
     // Implement RRQ (Read Request) handling here
+
+
 }
 
 // Function to handle WRQ (Write Request)
 void handle_wrq(int sockfd, struct sockaddr_in client_address, char *filename) {
     // Implement WRQ (Write Request) handling here
 }
+
+// Function to handle ERROR
+void handle_error(int sockfd, struct sockaddr_in * client_address, int error_code){
+    char * packet; 
+    char * msg;
+    int packet_size = 5; // opcodes and end byte
+    int msg_size;
+    if(error_code == 0){ // Not defined (11), see error message
+        packet_size += 11;
+        msg_size = 11;
+        msg = calloc(msg_size, sizeof(char));
+        strcat(msg, "Not defined");
+    }
+    if(error_code == 1){ // File not found (14)
+        packet_size += 14;
+        msg_size = 14;
+        msg = calloc(msg_size, sizeof(char));
+        strcat(msg, "File not found");
+    }
+    if(error_code == 2){ // Access violation (16)
+        packet_size += 16;
+        msg_size = 16;
+        msg_size = 11;
+        msg = calloc(msg_size, sizeof(char));
+        strcat(msg, "Access violation");        
+    }
+    if(error_code == 3){ // Disk full or allocation exceeded (33)
+        packet_size += 33;
+        msg_size = 33;
+        msg_size = 11;
+        msg = calloc(msg_size, sizeof(char));
+        strcat(msg, "Disk full or allocation exceeded");        
+    }
+    if(error_code == 4){ // Illegal TFTP operation (22)
+        packet_size += 22;
+        msg_size = 22;
+        msg_size = 11;
+        msg = calloc(msg_size, sizeof(char));
+        strcat(msg, "Illegal TFTP operation");
+    }
+    if(error_code == 5){ // Unknown transfer ID (19)
+        packet_size += 19;
+        msg_size = 19;
+        msg_size = 11;
+        msg = calloc(msg_size, sizeof(char));
+        strcat(msg, "Unknown transfer ID");
+    }
+    if(error_code == 6){ // File already exists (19)
+        packet_size += 19;
+        msg_size = 19;
+        msg_size = 11;
+        msg = calloc(msg_size, sizeof(char));
+        strcat(msg, "File already exists");
+    }
+    if(error_code == 7){ // No such user (12)
+        packet_size += 12;
+        msg_size = 12;
+        msg_size = 11;
+        msg = calloc(msg_size, sizeof(char));
+        strcat(msg, "No such user");
+    }
+    // Create packet
+    *packet = htons(5);
+    packet += 2;
+    *packet = htons(error_code);
+    strcat(packet, msg);
+    packet[packet_size] = '\0';
+
+    // Send packet
+    sendto(sockfd, packet, packet_size, 0, (struct sockaddr *) client_address, sizeof(client_address));
+
+    // Free packet and msg
+    free(packet);
+    free(msg);
+
+    // Terminate connection
+    exit(1);
+}
+
+// Function to handle ACK
 
 int main(int argc, char *argv[]) {
     if (argc != 3) {
@@ -127,6 +209,8 @@ int main(int argc, char *argv[]) {
             } else {
                 // Unsupported opcode
                 printf("Unsupported opcode: %d\n", opcode);
+                // Send ERROR packet
+                handle_error(sockfd, &client_address, 4);
             }
         }
     }
