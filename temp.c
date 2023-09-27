@@ -23,7 +23,96 @@ void handle_rrq(int sockfd, struct sockaddr_in client_address, char *filename) {
 
 // Function to handle WRQ (Write Request)
 void handle_wrq(int sockfd, struct sockaddr_in client_address, char *filename) {
-    // Implement WRQ (Write Request) handling here
+    
+    FILE *write_file = fopen(filename, "wb");
+    if (write_file == NULL) {
+        send_error(sockfd, &client_address, 6); //file already exists
+        return;
+    }
+
+    send_ack(sockfd, &client_address, 0);
+
+    int block_num = 1;
+    ssize_t bytes_received;
+    char data[1000000];
+
+    // Set up timer for data timeout
+    struct timeval data_timeout;
+    data_timeout.tv_sec = DATA_TIMEOUT;
+    data_timeout.tv_usec = 0;
+
+    // Set up timer for connection timeout
+    struct timeval connection_timeout;
+    connection_timeout.tv_sec = CONNECTION_TIMEOUT;
+    connection_timeout.tv_usec = 0;
+
+    socklen_t client_len = sizeof(client_address);
+
+    while (1) {
+        memset(data, 0, sizeof(data));
+        bytes_received = recvfrom(sockfd, data, sizeof(data), 0, (struct sockaddr *)&client_address, &client_len);
+
+        if (bytes_received < 0) {
+            perror("Error receiving data packet");
+            fclose(write_file);
+            send_error(sockfd, &client_address, 0);
+            return;
+        }
+
+        unsigned short opcode, received_block;
+        memcpy(&opcode, data, sizeof(unsigned short));
+        opcode = ntohs(opcode);
+        memcpy(&received_block, data + 2, sizeof(unsigned short));
+        received_block = ntohs(received_block);
+
+        // if (opcode != 3) {
+        //     send_error(sockfd, &client_address, 4);
+        //     fclose(write_file);
+        //     return;
+        // }
+
+        if (received_block != block_num) {
+            send_ack(sockfd, &client_address, block_num - 1);
+            continue; // Skip writing duplicate data
+        }
+
+        fwrite(data + 4, 1, bytes_received - 4, write_file);
+
+        send_ack(sockfd, &client_address, block_num);
+        block_num++;
+
+        if (bytes_received < 1000000 + 4) {
+            break; // End of file transfer
+        }
+
+        data_timeout.tv_sec = DATA_TIMEOUT;
+        data_timeout.tv_usec = 0;
+        connection_timeout.tv_sec = CONNECTION_TIMEOUT;
+        connection_timeout.tv_usec = 0;
+
+        // Set up timer for select
+        struct timeval select_timeout;
+        select_timeout.tv_sec = 0;
+        select_timeout.tv_usec = 0;
+
+        fd_set read_fds;
+        FD_ZERO(&read_fds);
+        FD_SET(sockfd, &read_fds);
+
+        int select_result = select(sockfd + 1, &read_fds, NULL, NULL, &select_timeout);
+
+        if (select_result < 0) {
+            perror("Error in select");
+            fclose(write_file);
+            return;
+        } else if (select_result == 0) {
+            fseek(write_file, 0, SEEK_SET);
+            int last_block_num = block_num - 1;
+            send_data(sockfd, &client_address, last_block_num, data + 4, bytes_received - 4);
+        }
+    }
+
+    fclose(write_file);
 }
 
 // Function to send ERROR
