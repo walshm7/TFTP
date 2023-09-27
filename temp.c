@@ -1,3 +1,4 @@
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -6,6 +7,7 @@
 #include <netinet/in.h>
 #include <sys/time.h>
 #include <signal.h>
+#include "lib/unp.h"
 
 #define MAX_PORT_RANGE 65535  
 #define MAX_BUFFER_SIZE 516   
@@ -13,96 +15,6 @@
 // Timeout duration in seconds
 #define DATA_TIMEOUT 1
 #define CONNECTION_TIMEOUT 10
-
-// Function to handle RRQ (Read Request) (will call send_data?)
-void handle_rrq(int sockfd, struct sockaddr_in client_address, char *filename) {
-    // Implement RRQ (Read Request) handling here
-    
-    // Open file
-    FILE * read_file = fopen(filename, 'r');
-
-    // Send error for failed open file
-    if(read_file == -1){
-        send_error(sockfd, &client_address, 1);
-    }
-
-    // Start read
-    int block_num = 1;
-    int file_size;
-    fseek(read_file, 0, SEEK_END);
-    file_size = ftell(read_file);
-    fseek(read_file, 0, SEEK_SET);
-    char * data;
-    if(file_size < 512){
-        data = calloc(file_size + 1, sizeof(char));
-        fread(data, sizeof(char), file_size, read_file);
-        data[file_size] = '\0';
-        send_data(sockfd, &client_address, block_num, data, file_size+1);
-
-        // Wait for ACK
-        while(1){
-            // Set up timer for data timeout
-            struct timeval data_timeout;
-            data_timeout.tv_sec = DATA_TIMEOUT;
-            data_timeout.tv_usec = 0;
-
-            // Set up timer for connection timeout
-            struct timeval connection_timeout;
-            connection_timeout.tv_sec = CONNECTION_TIMEOUT;
-            connection_timeout.tv_usec = 0;
-
-            // Initialize and set up file descriptors for select()
-            fd_set read_fds;
-            FD_ZERO(&read_fds);
-            FD_SET(sockfd, &read_fds);
-
-            // 10 second timer
-            int select_result = select(sockfd + 1, &read_fds, NULL, NULL, &connection_timeout);
-
-            int resend_result = select(sockfd + 1, &read_fds, NULL, NULL, &data_timeout);
-
-            if (resend_result < 0) {
-                perror("Error in select");
-                exit(1);
-            } else if (resend_result == 0) {
-                // resend data
-                send_data(sockfd, &client_address, block_num, data, file_size+1);
-                continue;
-            }
-
-            if (select_result < 0) {
-                perror("Error in select");
-                exit(1);
-            } else if (select_result == 0) {
-                // Connection timeout
-                printf("Connection timeout, aborting\n");
-                exit(1);
-            }
-        }
-    }
-    else{ //require multiple reads
-        while(){
-            block_num++;
-        }
-
-    }
-
-}
-
-// Function to handle WRQ (Write Request) (will call handle data)
-void handle_wrq(int sockfd, struct sockaddr_in client_address, char *filename) {
-    // Implement WRQ (Write Request) handling here
-}
-
-// Function to handle DATA packet
-void handle_data(){
-
-}
-
-// Function to handle ERROR packet
-void handle_error(){
-
-}
 
 // Function to send DATA packet
 void send_data(int sockfd, struct sockaddr_in * client_address, int block_num, char * data, int data_len){
@@ -181,9 +93,8 @@ void send_error(int sockfd, struct sockaddr_in * client_address, int error_code)
         strcat(msg, "No such user");
     }
     // Create packet
-    *packet = htons(5);
-    packet += 2;
-    *packet = htons(error_code);
+    packet[0] = htons(5);
+    packet[2] = htons(error_code);
     strcat(packet, msg);
     packet[packet_size] = '\0';
 
@@ -212,6 +123,221 @@ void send_ack(int sockfd, struct sockaddr_in * client_address, int block_num){
     // Free packet
     free(packet);
 }
+
+
+// Function to handle RRQ (Read Request) (will call send_data?)
+void handle_rrq(int sockfd, struct sockaddr_in client_address, char *filename, socklen_t client_len) {
+    // Implement RRQ (Read Request) handling here
+    printf("WHATTTTTTT: %s\n", filename);
+    // Open file
+    FILE * read_file = fopen(filename, "r");
+
+    // Send error for failed open file
+    if(!(read_file)){
+        printf("BAD FILE!!!\n");
+        send_error(sockfd, &client_address, 1);
+        exit(1);
+    }
+
+
+    printf("??????: %d\n", read_file);
+
+    // Start read
+    int block_num = 1;
+    int file_size;
+    fseek(read_file, 0, SEEK_END);
+    file_size = ftell(read_file);
+    fseek(read_file, 0, SEEK_SET);
+    
+    int fd = open(filename, 0);
+    char * data;
+    printf("%d\n", file_size);
+    if(file_size <= 0){
+        send_error(sockfd, &client_address, 1);
+        exit(1);
+    }
+    else if(file_size < 511){
+        data = calloc(file_size + 1, sizeof(char));
+        fread(data, sizeof(char), file_size, read_file);
+        data[file_size] = '\0';
+        send_data(sockfd, &client_address, block_num, data, file_size+1);
+
+        // Wait for ACK
+        while(1){
+            // Set up timer for data timeout
+            struct timeval data_timeout;
+            data_timeout.tv_sec = DATA_TIMEOUT;
+            data_timeout.tv_usec = 0;
+
+            // Set up timer for connection timeout
+            struct timeval connection_timeout;
+            connection_timeout.tv_sec = CONNECTION_TIMEOUT;
+            connection_timeout.tv_usec = 0;
+
+            // Initialize and set up file descriptors for select()
+            fd_set read_fds;
+            FD_ZERO(&read_fds);
+            FD_SET(sockfd, &read_fds);
+
+            // 10 second timer
+            int select_result = select(sockfd + 1, &read_fds, NULL, NULL, &connection_timeout);
+
+            int resend_result = select(sockfd + 1, &read_fds, NULL, NULL, &data_timeout);
+
+            if (resend_result < 0 || select_result < 0) {
+                perror("Error in select");
+                close(fd);
+                fclose(read_file);
+                exit(1);
+            } 
+            else if (select_result == 0) {
+                // Connection timeout
+                printf("Connection timeout, aborting\n");
+                close(fd);
+                fclose(read_file);
+                exit(1);
+            }else if (resend_result == 0) {
+                // resend data
+                send_data(sockfd, &client_address, block_num, data, file_size+1);
+                continue;
+            }
+            
+            // Receive ack
+            char buffer[MAX_BUFFER_SIZE];
+            if (FD_ISSET(sockfd, &read_fds)) {
+                // Receive request
+                memset(buffer, 0, sizeof(buffer));
+                ssize_t bytes_received = recvfrom(sockfd, buffer, sizeof(buffer), 0, (struct sockaddr *)&client_address, &client_len);
+
+                if (bytes_received < 0) {
+                    perror("Error receiving request");
+                }
+            }
+        }
+
+
+        free(data);
+    }
+    else{ //require multiple reads
+        fclose(read_file);
+        int bytes_remaining = file_size;
+        while(bytes_remaining > 512){
+            data = calloc(512, sizeof(char));
+            read(fd, data, 511);
+            data[512] = '\0';
+            send_data(sockfd, &client_address, block_num, data, 512);
+            // Set up timer for data timeout
+            struct timeval data_timeout;
+            data_timeout.tv_sec = DATA_TIMEOUT;
+            data_timeout.tv_usec = 0;
+
+            // Set up timer for connection timeout
+            struct timeval connection_timeout;
+            connection_timeout.tv_sec = CONNECTION_TIMEOUT;
+            connection_timeout.tv_usec = 0;
+
+            // Initialize and set up file descriptors for select()
+            fd_set read_fds;
+            FD_ZERO(&read_fds);
+            FD_SET(sockfd, &read_fds);
+
+            // 10 second timer
+            int select_result = select(sockfd + 1, &read_fds, NULL, NULL, &connection_timeout);
+
+            int resend_result = select(sockfd + 1, &read_fds, NULL, NULL, &data_timeout);
+
+            if (resend_result < 0 || select_result < 0) {
+                perror("Error in select");
+                exit(1);
+            } 
+            else if (select_result == 0) {
+                // Connection timeout
+                printf("Connection timeout, aborting\n");
+                exit(1);
+            }else if (resend_result == 0) {
+                // resend data
+                send_data(sockfd, &client_address, block_num, data, file_size+1);
+                continue;
+            }
+            //receive ack
+            char buffer[MAX_BUFFER_SIZE];
+            if (FD_ISSET(sockfd, &read_fds)) {
+                // Receive request
+                memset(buffer, 0, sizeof(buffer));
+                ssize_t bytes_received = recvfrom(sockfd, buffer, sizeof(buffer), 0, (struct sockaddr *)&client_address, &client_len);
+
+                if (bytes_received < 0) {
+                    perror("Error receiving request");
+                }
+                printf("ACK received\n");
+            }
+            free(data);
+
+            block_num++;
+            bytes_remaining -= 511;
+        }
+
+        if(bytes_remaining != 0){
+            data = calloc(bytes_remaining+1, sizeof(char));
+            read(fd, data, bytes_remaining);
+            data[bytes_remaining] = '\0';
+            send_data(sockfd, &client_address, block_num, data, bytes_remaining);
+            // Set up timer for data timeout
+            struct timeval data_timeout;
+            data_timeout.tv_sec = DATA_TIMEOUT;
+            data_timeout.tv_usec = 0;
+
+            // Set up timer for connection timeout
+            struct timeval connection_timeout;
+            connection_timeout.tv_sec = CONNECTION_TIMEOUT;
+            connection_timeout.tv_usec = 0;
+
+            // Initialize and set up file descriptors for select()
+            fd_set read_fds;
+            FD_ZERO(&read_fds);
+            FD_SET(sockfd, &read_fds);
+
+            // 10 second timer
+            int select_result = select(sockfd + 1, &read_fds, NULL, NULL, &connection_timeout);
+
+            int resend_result = select(sockfd + 1, &read_fds, NULL, NULL, &data_timeout);
+
+            if (resend_result < 0 || select_result < 0) {
+                perror("Error in select");
+                exit(1);
+            } else if (resend_result == 0) {
+                // resend data
+                send_data(sockfd, &client_address, block_num, data, file_size+1);
+            } else if (select_result == 0) {
+                // Connection timeout
+                printf("Connection timeout, aborting\n");
+                exit(1);
+            }
+
+            // receive ACK
+
+            free(data);
+        }
+
+    }
+
+}
+
+// Function to handle WRQ (Write Request) (will call handle data)
+void handle_wrq(int sockfd, struct sockaddr_in client_address, char *filename) {
+    // Implement WRQ (Write Request) handling here
+}
+
+// Function to handle DATA packet
+void handle_data(){
+
+}
+
+// Function to handle ERROR packet
+void handle_error(){
+
+}
+
 
 
 
@@ -245,35 +371,36 @@ int main(int argc, char *argv[]) {
     // Initialize server_address structure
     memset(&server_address, 0, sizeof(server_address));
     server_address.sin_family = AF_INET;
-    server_address.sin_addr.s_addr = INADDR_ANY;
+    server_address.sin_addr.s_addr = htonl(INADDR_ANY);
 
+    // Set the port for the server_address
     int current_port = start_port;
+    server_address.sin_port = htons(current_port);
+
+    // Bind socket
+    if (bind(sockfd, (struct sockaddr *)&server_address, sizeof(server_address)) < 0) {
+        perror("Error binding");
+        current_port++;
+
+        if (current_port > end_port) {
+            fprintf(stderr, "No available ports in the specified range\n");
+            exit(1);
+        }
+
+    }
+
+    printf("Server started at %d\n",current_port);
     int rc = getpid();
     int tid = start_port;
     while (1) {
-        // Set the port for the server_address
-        server_address.sin_port = htons(current_port);
-
-        // Bind socket
-        if (bind(sockfd, (struct sockaddr *)&server_address, sizeof(server_address)) < 0) {
-            perror("Error binding");
-            current_port++;
-
-            if (current_port > end_port) {
-                fprintf(stderr, "No available ports in the specified range\n");
-                exit(1);
-            }
-
-            continue;
-        }
 
         // Set up timer for data timeout
-        struct timeval data_timeout;
+       /*struct timeval data_timeout;
         data_timeout.tv_sec = DATA_TIMEOUT;
-        data_timeout.tv_usec = 0;
+        data_timeout.tv_usec = 0;*/
 
         // Set up timer for connection timeout
-        struct timeval connection_timeout;
+       /* struct timeval connection_timeout;
         connection_timeout.tv_sec = CONNECTION_TIMEOUT;
         connection_timeout.tv_usec = 0;
 
@@ -293,7 +420,7 @@ int main(int argc, char *argv[]) {
             break;
         }
 
-        if (FD_ISSET(sockfd, &read_fds)) {
+        if (FD_ISSET(sockfd, &read_fds)) {*/
             // Receive request
             memset(buffer, 0, sizeof(buffer));
             ssize_t bytes_received = recvfrom(sockfd, buffer, sizeof(buffer), 0, (struct sockaddr *)&client_address, &client_len);
@@ -302,14 +429,13 @@ int main(int argc, char *argv[]) {
                 perror("Error receiving request");
                 continue;
             }
-
             // Get next server TID (only for new connection)
             if(rc != 0){
                 if(start_port + 1 < end_port){
                     tid = start_port + 1;
 
                     // Fork process
-                    rc = fork;
+                    rc = fork();
                 }
                 else{// cancel connection?
 
@@ -323,7 +449,7 @@ int main(int argc, char *argv[]) {
                 server_address.sin_port = htons(tid);
 
                 // Bind socket
-                if (bind(sockfd, (struct sockaddr *)&server_address, sizeof(server_address)) < 0) {
+                /*if (bind(sockfd, (struct sockaddr *)&server_address, sizeof(server_address)) < 0) {
                     perror("Error binding");
                     tid++;
 
@@ -333,17 +459,18 @@ int main(int argc, char *argv[]) {
                     }
 
                     continue;
-                }
+                }*/
 
                 // Extract opcode
                 unsigned short opcode;
                 memcpy(&opcode, buffer, sizeof(unsigned short));
                 opcode = ntohs(opcode);
-
+                printf("%d\n", opcode);
                 if (opcode == 1) {
                     // RRQ - Read Request
+                    printf("%d: HELLO!!!!!!!!!!!\n", getpid());
                     char *filename = buffer + 2;
-                    handle_rrq(sockfd, client_address, filename);
+                    handle_rrq(sockfd, client_address, filename, client_len);
                 } else if (opcode == 2) {
                     // WRQ - Write Request
                     char *filename = buffer + 2;
@@ -355,7 +482,7 @@ int main(int argc, char *argv[]) {
                     send_error(sockfd, &client_address, 4);
                 }
             }
-        }
+        //}
     }
 
     close(sockfd);
