@@ -122,19 +122,31 @@ void send_error(int sockfd, struct sockaddr_in * client_address, int error_code,
     exit(1);
 }
 
+
 // Function to send ACK
 void send_ack(int sockfd, struct sockaddr_in * client_address, int block_num){
     // Build ACK packet
-    char * packet = calloc(4, sizeof(char));
-    *packet = htons(4);
-    packet +=2;
-    *packet =  htons(block_num);
+    // char * packet = calloc(4, sizeof(char));
+    // *packet = htons(4);
+    // packet +=2;
+    // *packet =  htons(block_num);
+
+    // // Send packet
+    // sendto(sockfd, packet, 4, 0, (struct sockaddr *) client_address, sizeof(client_address));
+
+    // // Free packet
+    // free(packet);
+
+    // Build ACK packet
+    char packet[4]; // Fixed size, no need to dynamically allocate memory
+    unsigned short opcode = htons(4);
+    unsigned short block = htons(block_num);
+
+    memcpy(packet, &opcode, sizeof(unsigned short));
+    memcpy(packet + 2, &block, sizeof(unsigned short));
 
     // Send packet
-    sendto(sockfd, packet, 4, 0, (struct sockaddr *) client_address, sizeof(client_address));
-
-    // Free packet
-    free(packet);
+    sendto(sockfd, packet, sizeof(packet), 0, (struct sockaddr *)client_address, sizeof(*client_address));
 }
 
 
