@@ -547,6 +547,7 @@ int main(int argc, char *argv[]) {
 
                     if (tid > end_port) {
                         fprintf(stderr, "No available ports in the specified range\n");
+                        send_error(sockfd, &client_address, 3, client_len);
                         exit(1);
                     }
 
