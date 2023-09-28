@@ -484,6 +484,26 @@ void handle_wrq(int sockfd, struct sockaddr_in client_address, char *filename, s
             fclose(fp);
             exit(1);
         }
+
+        fd_set read_fds;
+        FD_ZERO(&read_fds);
+        FD_SET(sockfd, &read_fds);
+
+        int select_result = select(sockfd + 1, &read_fds, NULL, NULL, &data_timeout);
+
+        if (resend_result < 0 || select_result < 0) {
+            perror("Error in select");
+            exit(1);
+        } else if (resend_result == 0) {
+            // resend data
+            printf("ACK not received resending block %d\n", block_num);
+            send_data(sockfd, &client_address, block_num, data, file_size+1, client_len);
+        }
+        if (select_result == 0) {
+            // Connection timeout
+            printf("Connection timeout, aborting\n");
+            exit(1);
+        }
     }
 
 }
