@@ -409,14 +409,84 @@ void handle_rrq(int sockfd, struct sockaddr_in client_address, char *filename, s
 }
 
 // Function to handle WRQ (Write Request) (will call handle data)
-void handle_wrq(int sockfd, struct sockaddr_in client_address, char *filename) {
-    // Implement WRQ (Write Request) handling here
+void handle_wrq(int sockfd, struct sockaddr_in client_address, char *filename, socklen_t client_len) {
+
+    FILE *fp;
+    int block_num = 0; 
+
+    // Open the file for writing
+    fp = fopen(filename, "wb"); 
+    if (!fp) {
+        send_error(sockfd, &client_address, 2, client_len); 
+        perror("Error opening file for writing");
+        exit(1);
+    }
+
+    send_ack(sockfd, &client_address, block_num);
+
+    while(1){
+        char buffer[MAX_BUFFER_SIZE];
+        ssize_t bytes_received = recvfrom(sockfd, buffer, sizeof(buffer), 0, (struct sockaddr *)&client_address, &client_len);
+
+        if (bytes_received < 0) {
+            perror("Error receiving data");
+            fclose(fp);
+            exit(1);
+        }
+
+        printf("%ld bytes_received\n", bytes_received);
+
+        unsigned short opcode;
+        memcpy(&opcode, buffer, sizeof(unsigned short));
+        opcode = ntohs(opcode);
+
+        if (opcode == 3) {
+            unsigned short received_block_num;
+            memcpy(&received_block_num, buffer + 2, sizeof(unsigned short));
+            received_block_num = ntohs(received_block_num);
+
+            if (received_block_num == block_num + 1) { 
+                int data_length = bytes_received - 4; 
+                fwrite(buffer + 4, 1, data_length, fp); 
+                block_num = received_block_num; 
+
+                send_ack(sockfd, &client_address, block_num);
+
+                if (data_length < MAX_BUFFER_SIZE - 4) {
+                    printf("File transfer completed.\n");
+                    fclose(fp);
+                    break;
+                }
+            } else if (received_block_num == block_num) {
+                printf("Received duplicate block %d, ignoring...\n", block_num + 1);
+            } else {
+                send_ack(sockfd, &client_address, block_num);
+            }
+        } else if (opcode == 5) { // Error packet
+            printf("Received ERROR packet. Exiting...\n");
+            fclose(fp);
+            exit(1);
+        } else {
+            printf("Unsupported opcode: %d\n", opcode);
+            send_error(sockfd, &client_address, 4, client_len); // Illegal TFTP operation
+            fclose(fp);
+            exit(1);
+        }
+    }
+
 }
 
 // Function to handle DATA packet
-void handle_data(){
+// void handle_data(int sockfd, struct sockaddr_in * client_address, int block_num, char * data, int data_len, socklen_t client_len){
+//     ssize_t c;
 
-}
+//     if ((c = recvfrom(sockfd, data, sizeof(*data), 0, (struct sockaddr_in *) client_address, client_len)) < 0
+//           && errno != EAGAIN) {
+//           perror("server: recvfrom()");
+//      }
+
+//      return c;
+// }
 
 // Function to handle ERROR packet
 void handle_error(){
